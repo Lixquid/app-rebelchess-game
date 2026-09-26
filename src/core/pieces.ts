@@ -374,6 +374,26 @@ export const getValidMovesForPiece = (
           continue;
         }
 
+        // For non-jumping moves that move more than 1 step, check intermediate squares
+        if (!adjMove.jumping && (Math.abs(adjMove.dr) > 1 || Math.abs(adjMove.dc) > 1)) {
+          const stepRow = adjMove.dr > 0 ? 1 : adjMove.dr < 0 ? -1 : 0;
+          const stepCol = adjMove.dc > 0 ? 1 : adjMove.dc < 0 ? -1 : 0;
+          let checkRow = position.row + stepRow;
+          let checkCol = position.col + stepCol;
+          let blocked = false;
+          while (checkRow !== targetRow || checkCol !== targetCol) {
+            if (board[checkRow][checkCol] !== null) {
+              blocked = true;
+              break;
+            }
+            checkRow += stepRow;
+            checkCol += stepCol;
+          }
+          if (blocked) {
+            continue;
+          }
+        }
+
         // For capture moves, the target being occupied is required, not blocking
         // Only block non-capture moves (or moves that are not capture-only)
         if (!isCapture && isBlocked && !adjMove.jumping) {
