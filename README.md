@@ -30,7 +30,7 @@
 # Install dependencies
 npm install
 
-# Start development server (port 8100)
+# Start development server (port 8080)
 npm run dev
 
 # Build for production
