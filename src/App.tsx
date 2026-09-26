@@ -204,9 +204,9 @@ function SettingsModal({ isOpen, onClose, hoverMovesEnabled, onHoverMovesToggle 
 
 const App = () => {
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const [vsAI, setVsAI] = useState(false);
+  const [vsAI, setVsAI] = useState(true);
   const [aiProfile, setAIProfile] = useState<AIProfile>('bloodthirsty');
-  const [moveMode, setMoveMode] = useState<'regular' | 'capture-first'>('regular');
+  const [moveMode, setMoveMode] = useState<'regular' | 'capture-first'>('capture-first');
   const [victoryCondition, setVictoryCondition] = useState<VictoryCondition>('capture-leader');
   const [lastMove, setLastMove] = useState<{ from: Position; to: Position } | null>(null);
   const [selectedBoardPreset, setSelectedBoardPreset] = useState<string>(classicBoardPreset.id);
