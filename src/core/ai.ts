@@ -3,33 +3,18 @@
  */
 
 import type {
-  Position,
   Color,
   Piece,
   PieceDefinitions,
   BoardSize,
+  AIConfig,
+  AIMove,
 } from './types';
 import {
   getAllValidMovesForPlayer,
   filterCaptureMoves,
   getPieceAt,
 } from './pieces';
-
-export type AIProfile = 'bloodthirsty' | 'random';
-
-export interface AIConfig {
-  profile: AIProfile;
-  depth?: number;
-}
-
-export interface AIMove {
-  from: Position;
-  to: Position;
-  piece: Piece;
-  capturedPiece?: Piece;
-  isCapture: boolean;
-  score?: number;
-}
 
 const PIECE_VALUES: Record<string, number> = {
   pawn: 100,
@@ -43,7 +28,8 @@ const PIECE_VALUES: Record<string, number> = {
 };
 
 /**
- * Bloodthirsty AI: Always captures if possible, otherwise random move
+ * Bloodthirsty AI: Always captures if possible (highest-value target first),
+ * otherwise makes a random move
  */
 export const getBloodthirstyMove = (
   board: (Piece | null)[][],
@@ -51,23 +37,12 @@ export const getBloodthirstyMove = (
   pieceDefinitions: PieceDefinitions,
   boardSize: BoardSize
 ): AIMove | null => {
-  console.log('[getBloodthirstyMove] Called for player:', currentPlayer);
-  const allMoves = getAllValidMovesForPlayer(
-    board,
-    currentPlayer,
-    pieceDefinitions,
-    boardSize
-  );
-  console.log('[getBloodthirstyMove] All valid moves:', allMoves.length);
-
+  const allMoves = getAllValidMovesForPlayer(board, currentPlayer, pieceDefinitions, boardSize);
   if (allMoves.length === 0) {
-    console.log('[getBloodthirstyMove] No valid moves');
     return null;
   }
 
   const captureMoves = filterCaptureMoves(board, allMoves, currentPlayer);
-  console.log('[getBloodthirstyMove] Capture moves available:', captureMoves.length);
-
   if (captureMoves.length > 0) {
     const sortedCaptures = [...captureMoves].sort((a, b) => {
       const targetA = board[a.to.row][a.to.col];
@@ -80,7 +55,6 @@ export const getBloodthirstyMove = (
     const move = sortedCaptures[0];
     const piece = getPieceAt(board, move.from);
     const capturedPiece = getPieceAt(board, move.to);
-    console.log('[getBloodthirstyMove] Selected capture move:', move, 'captured:', capturedPiece);
     return {
       from: move.from,
       to: move.to,
@@ -92,7 +66,6 @@ export const getBloodthirstyMove = (
 
   const randomMove = allMoves[Math.floor(Math.random() * allMoves.length)];
   const piece = getPieceAt(board, randomMove.from);
-  console.log('[getBloodthirstyMove] No captures, random move:', randomMove);
   return {
     from: randomMove.from,
     to: randomMove.to,
@@ -108,27 +81,44 @@ export const getRandomMove = (
   board: (Piece | null)[][],
   currentPlayer: Color,
   pieceDefinitions: PieceDefinitions,
-  boardSize: BoardSize
+  boardSize: BoardSize,
+  captureFirst = false
 ): AIMove | null => {
-  console.log('[getRandomMove] Called for player:', currentPlayer);
-  const allMoves = getAllValidMovesForPlayer(
-    board,
-    currentPlayer,
-    pieceDefinitions,
-    boardSize
-  );
-  console.log('[getRandomMove] All valid moves:', allMoves.length);
-
+  const allMoves = getAllValidMovesForPlayer(board, currentPlayer, pieceDefinitions, boardSize);
   if (allMoves.length === 0) {
-    console.log('[getRandomMove] No valid moves');
     return null;
   }
 
-  const randomMove = allMoves[Math.floor(Math.random() * allMoves.length)];
+  // Pick a random piece first, then a random move for it. Capture-first mode
+  // constrains the chosen piece's move (must capture if it can) but never
+  // restricts which piece is selected.
+  const movesByPiece = new Map<string, typeof allMoves>();
+  for (const move of allMoves) {
+    const key = `${move.from.row},${move.from.col}`;
+    const list = movesByPiece.get(key);
+    if (list) {
+      list.push(move);
+    } else {
+      movesByPiece.set(key, [move]);
+    }
+  }
+  const pieceMoveLists = [...movesByPiece.values()];
+  let chosenMoves = pieceMoveLists[Math.floor(Math.random() * pieceMoveLists.length)];
+
+  if (captureFirst) {
+    const captures = chosenMoves.filter(m => {
+      const target = board[m.to.row][m.to.col];
+      return target !== null && target.color !== currentPlayer;
+    });
+    if (captures.length > 0) {
+      chosenMoves = captures;
+    }
+  }
+
+  const randomMove = chosenMoves[Math.floor(Math.random() * chosenMoves.length)];
   const piece = getPieceAt(board, randomMove.from);
   const capturedPiece = getPieceAt(board, randomMove.to);
   const isCapture = capturedPiece !== null && capturedPiece.color !== currentPlayer;
-  console.log('[getRandomMove] Selected random move:', randomMove, 'isCapture:', isCapture);
 
   return {
     from: randomMove.from,
@@ -149,68 +139,11 @@ export const makeAIMove = (
   boardSize: BoardSize,
   config: AIConfig
 ): AIMove | null => {
-  console.log('[makeAIMove] Called with profile:', config.profile);
   switch (config.profile) {
-    case 'bloodthirsty':
-      return getBloodthirstyMove(board, currentPlayer, pieceDefinitions, boardSize);
     case 'random':
-      return getRandomMove(board, currentPlayer, pieceDefinitions, boardSize);
+      return getRandomMove(board, currentPlayer, pieceDefinitions, boardSize, config.captureFirst);
+    case 'bloodthirsty':
     default:
-      console.log('[makeAIMove] Unknown profile, defaulting to bloodthirsty');
       return getBloodthirstyMove(board, currentPlayer, pieceDefinitions, boardSize);
   }
-};
-
-/**
- * Evaluates a board position from the perspective of a color
- */
-export const evaluatePosition = (
-  board: (Piece | null)[][],
-  _pieceDefinitions: PieceDefinitions,
-  _boardSize: BoardSize,
-  perspective: Color = 'white'
-): number => {
-  let score = 0;
-  const multiplier = perspective === 'white' ? 1 : -1;
-
-  for (let row = 0; row < board.length; row++) {
-    for (let col = 0; col < board[row].length; col++) {
-      const piece = board[row][col];
-      if (piece) {
-        const value = PIECE_VALUES[piece.type] || 0;
-        if (piece.color === 'white') {
-          score += value;
-        } else {
-          score -= value;
-        }
-      }
-    }
-  }
-
-  return score * multiplier;
-};
-
-/**
- * AI Profile configurations
- */
-export const AIProfiles: Record<AIProfile, { name: string; description: string }> = {
-  bloodthirsty: {
-    name: 'Bloodthirsty',
-    description: 'Always captures if possible, otherwise moves randomly',
-  },
-  random: {
-    name: 'Random',
-    description: 'Moves completely randomly',
-  },
-};
-
-/**
- * Creates an AI config from a profile name
- */
-export const createAIConfig = (profileName: string, depth?: number): AIConfig => {
-  const profile = profileName as AIProfile;
-  if (!AIProfiles[profile]) {
-    return { profile: 'bloodthirsty', depth };
-  }
-  return { profile, depth };
 };

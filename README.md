@@ -21,7 +21,6 @@
 
 - 🎮 **LocalStorage Persistence**: Games save automatically and restore on refresh
 - 📱 **Fully Responsive**: Board scales to fit any screen size
-- 🔌 **Offline Support**: Service Worker enables fully offline play
 - ⚙️ **Configurable**: Board preset, move mode, victory condition, AI profile
 
 ## Quick Start
@@ -44,10 +43,10 @@ npm run preview
 
 | Setting           | Options                          | Default        |
 | ----------------- | -------------------------------- | -------------- |
-| Board Preset      | Classic 8×8, Large 10×10, Custom | Classic 8×8    |
-| Move Mode         | Regular, Capture First           | Regular        |
+| Board Preset      | Classic 8×8, Chess960, Fairy Mix, Small/Large boards | Classic 8×8 |
+| Move Mode         | Regular, Capture First           | Capture First  |
 | Victory Condition | Capture Leader, Capture All      | Capture Leader |
-| VS AI             | On/Off                           | Off            |
+| VS AI             | On/Off                           | On             |
 | AI Profile        | Bloodthirsty, Random             | Bloodthirsty   |
 
 ## Building for Production
@@ -56,9 +55,15 @@ npm run preview
 npm run build
 ```
 
-Outputs to `dist/` - deploy this folder to any static host (Netlify, Vercel, GitHub Pages, etc.)
+Outputs to `dist/` - deploy this folder to any static host (Netlify, Vercel, GitHub Pages, etc.).
 
-The service worker (`public/sw.js`) enables offline play. Ensure your host serves over HTTPS (required for SW).
+## Testing
+
+```bash
+npm run test
+```
+
+Runs the core engine test suite (move generation, capture-first filtering, victory conditions, preset generators) with Vitest.
 
 ## License
 

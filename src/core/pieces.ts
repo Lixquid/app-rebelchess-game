@@ -19,7 +19,6 @@ import { isValidPosition, oppositeColor } from './types';
  * White moves "up" (decreasing row), Black moves "down" (increasing row)
  */
 const adjustMovesForColor = (moves: PieceMove[], color: Color): PieceMove[] => {
-  console.log('[adjustMovesForColor] Adjusting moves for color:', color);
   if (color === 'white') {
     return moves;
   }
@@ -319,8 +318,6 @@ export const getValidMovesForPiece = (
     if (move.firstMoveOnly && piece.hasMoved) {
       continue;
     }
-    console.log('[getValidMovesForPiece] Called for piece:', piece.type, piece.color, 'at:', position);
-
     const adjustedMoves = adjustMovesForColor([move], piece.color);
 
     for (const adjMove of adjustedMoves) {
@@ -417,12 +414,9 @@ export const getPieceAt = (
   board: (Piece | null)[][],
   position: Position
 ): Piece | null => {
-  console.log('[getPieceAt] Called with position:', position);
   if (position.row < 0 || position.row >= board.length) return null;
   if (position.col < 0 || position.col >= board[0].length) return null;
-  const piece = board[position.row][position.col];
-  console.log('[getPieceAt] Piece found:', piece);
-  return piece;
+  return board[position.row][position.col];
 };
 
 /**

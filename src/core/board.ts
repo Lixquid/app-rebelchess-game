@@ -7,7 +7,6 @@ import type {
   Piece,
   Position,
   PieceSetup,
-  Color,
 } from './types';
 import { createPiece } from './types';
 
@@ -30,7 +29,7 @@ export const createDefaultBoard = (size: BoardSize = { rows: 8, cols: 8 }): (Pie
     return board;
   }
 
-  const backRank: PieceSetup[] = [
+  const blackBackRank: PieceSetup[] = [
     { type: 'rook', color: 'black' },
     { type: 'knight', color: 'black' },
     { type: 'bishop', color: 'black' },
@@ -52,15 +51,12 @@ export const createDefaultBoard = (size: BoardSize = { rows: 8, cols: 8 }): (Pie
     { type: 'rook', color: 'white' },
   ];
 
-  backRank.forEach((setup, col) => {
+  blackBackRank.forEach((setup, col) => {
     board[0][col] = createPiece(setup.type, setup.color);
   });
 
   for (let col = 0; col < 8; col++) {
     board[1][col] = createPiece('pawn', 'black');
-  }
-
-  for (let col = 0; col < 8; col++) {
     board[6][col] = createPiece('pawn', 'white');
   }
 
@@ -93,7 +89,7 @@ export const createBoardFromSetup = (
 };
 
 /**
- * Gets a piece at a position
+ * Gets a piece at a position (returns null for out-of-bounds positions)
  */
 export const getPieceAt = (
   board: (Piece | null)[][],
@@ -105,7 +101,7 @@ export const getPieceAt = (
 };
 
 /**
- * Sets a piece at a position
+ * Sets a piece at a position (no-op for out-of-bounds positions)
  */
 export const setPieceAt = (
   board: (Piece | null)[][],
@@ -142,113 +138,4 @@ export const movePiece = (
  */
 export const cloneBoard = (board: (Piece | null)[][]): (Piece | null)[][] => {
   return board.map(row => row.map(piece => piece ? { ...piece } : null));
-};
-
-/**
- * Checks if a position is within board bounds
- */
-export const isInBounds = (position: Position, boardSize: BoardSize): boolean => {
-  return position.row >= 0 &&
-         position.row < boardSize.rows &&
-         position.col >= 0 &&
-         position.col < boardSize.cols;
-};
-
-/**
- * Gets all pieces of a given color
- */
-export const getPiecesByColor = (
-  board: (Piece | null)[][],
-  color: Color
-): { piece: Piece; position: Position }[] => {
-  const pieces: { piece: Piece; position: Position }[] = [];
-
-  for (let row = 0; row < board.length; row++) {
-    for (let col = 0; col < board[row].length; col++) {
-      const piece = board[row][col];
-      if (piece && piece.color === color) {
-        pieces.push({ piece, position: { row, col } });
-      }
-    }
-  }
-
-  return pieces;
-};
-
-/**
- * Gets all possible moves for a player
- */
-export const getAllValidMoves = (
-  board: (Piece | null)[][],
-  color: Color,
-  pieceDefinitions: Record<string, any>,
-  boardSize: BoardSize,
-  getValidMovesForPiece: (
-    board: (Piece | null)[][],
-    piece: Piece,
-    position: Position,
-    pieceDefinitions: Record<string, any>,
-    boardSize: BoardSize
-  ) => Position[]
-): { piece: Piece; from: Position; to: Position }[] => {
-  const moves: { piece: Piece; from: Position; to: Position }[] = [];
-
-  for (let row = 0; row < board.length; row++) {
-    for (let col = 0; col < board[row].length; col++) {
-      const piece = board[row][col];
-      if (piece && piece.color === color) {
-        const validMoves = getValidMovesForPiece(board, piece, { row, col }, pieceDefinitions, boardSize);
-        for (const to of validMoves) {
-          moves.push({ piece, from: { row, col }, to });
-        }
-      }
-    }
-  }
-
-  return moves;
-};
-
-/**
- * Filters moves to only capturing moves
- */
-export const filterCaptureMoves = (
-  board: (Piece | null)[][],
-  moves: { piece: Piece; from: Position; to: Position }[],
-  color: Color
-): { piece: Piece; from: Position; to: Position }[] => {
-  return moves.filter(move => {
-    const target = getPieceAt(board, move.to);
-    return target !== null && target.color !== color;
-  });
-};
-
-/**
- * Checks if a move results in pawn promotion
- */
-export const isPromotionMove = (
-  piece: Piece,
-  to: Position,
-  boardSize: BoardSize
-): boolean => {
-  if (piece.type !== 'pawn') return false;
-  
-  if (piece.color === 'white') {
-    return to.row === 0;
-  } else {
-    return to.row === boardSize.rows - 1;
-  }
-};
-
-/**
- * Promotes a pawn to a queen (or other piece)
- */
-export const promotePawn = (
-  board: (Piece | null)[][],
-  position: Position,
-  promoteTo: Piece['type'] = 'queen'
-): void => {
-  const piece = getPieceAt(board, position);
-  if (piece && piece.type === 'pawn') {
-    setPieceAt(board, position, { ...piece, type: promoteTo });
-  }
 };

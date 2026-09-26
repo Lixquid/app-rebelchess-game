@@ -2,7 +2,7 @@
  * Core module exports for Rebel Chess
  */
 
-// Types
+// Types and helpers
 export type {
   Color,
   PieceType,
@@ -24,26 +24,31 @@ export type {
   BoardPreset,
 } from './types';
 
-// Functions from types
 export {
   createPiece,
-  createPieceSetup,
   defaultBoardSize,
   oppositeColor,
-  positionsEqual,
-  createPosition,
   isValidPosition,
-  defaultPieceDefinitions,
+} from './types';
+
+// Board presets
+export {
+  boardPresets,
   classicBoardPreset,
+  chess960Preset,
+  fairyMixChessPreset,
   demiChessPreset,
   silvermanPreset,
   microchessPreset,
-  boardPresets,
+  doublewidePreset,
+  berolinaChessPreset,
   getBoardPreset,
-} from './types';
+  resolveInitialSetup,
+} from './presets';
 
 // Piece logic
 export {
+  defaultPieceDefinitions,
   getPieceDefinition,
   getValidMovesForPiece,
   findLeaderPiece,
@@ -56,7 +61,7 @@ export {
   checkGameOver,
   isPromotionMove,
   promotePawn,
-  defaultPieceDefinitions as pieceDefinitions,
+  getPieceAt,
 } from './pieces';
 
 // Board operations
@@ -64,31 +69,18 @@ export {
   createEmptyBoard,
   createDefaultBoard,
   createBoardFromSetup,
-  getPieceAt,
-  setPieceAt,
   movePiece,
   cloneBoard,
-  isInBounds,
-  getPiecesByColor,
-  filterCaptureMoves as filterCaptureMovesBoard,
-  isPromotionMove as isPromotionMoveBoard,
-  promotePawn as promotePawnBoard,
 } from './board';
 
 // Game logic
 export {
   createGameState,
-  selectPiece,
-  deselectPiece,
-  makeMove,
-  makeRandomMove,
+  executeMove,
+  makeRandomMoveForPiece,
   makeAIMove,
-  getCurrentPlayerMoves,
-  resetGame,
-  getGameStatusText,
-  isValidMove,
   getPiece,
-  getValidMoves,
+  getGameStatusText,
   createDefaultGameConfig,
 } from './game';
 
@@ -97,7 +89,4 @@ export {
   makeAIMove as aiMakeMove,
   getBloodthirstyMove,
   getRandomMove,
-  evaluatePosition,
-  AIProfiles,
-  createAIConfig,
 } from './ai';

@@ -4,25 +4,26 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import type { GameState, Position, AIProfile, VictoryCondition } from './core/types';
-import { 
-  createGameState, 
+import {
+  createGameState,
   makeRandomMoveForPiece,
-  makeAIMove, 
-  deselectPiece, 
-  getPiece, 
-  createDefaultGameConfig
+  makeAIMove,
+  getPiece,
+  createDefaultGameConfig,
 } from './core/game';
-import { boardPresets, classicBoardPreset, getBoardPreset, resolveInitialSetup } from './core/types';
+import { boardPresets, classicBoardPreset, getBoardPreset, resolveInitialSetup } from './core/presets';
 import { Board } from './components/Board';
 import { GameStatus } from './components/GameStatus';
 import { MoveHistory } from './components/MoveHistory';
 import { CapturedPieces } from './components/CapturedPieces';
+import { SetupConfirmModal, SettingsModal } from './components/Modals';
+import { DebugStatePanel } from './components/DebugStatePanel';
 import { useResponsiveBoard } from './hooks/useResponsiveBoard';
 
 const STORAGE_KEY = 'rebel-chess-saved-game';
 const BOARD_MAX_WIDTH = 580;
 
-// Types for saved game data
+// Shape of the persisted game data
 interface SavedGameData {
   gameState: GameState | null;
   gameStarted: boolean;
@@ -33,13 +34,55 @@ interface SavedGameData {
   selectedBoardPreset: string;
   lastMove: { from: Position; to: Position } | null;
   hoverMovesEnabled: boolean;
+  debugPanelEnabled: boolean;
+}
+
+const AI_PROFILES: AIProfile[] = ['bloodthirsty', 'random'];
+const MOVE_MODES = ['regular', 'capture-first'] as const;
+const VICTORY_CONDITIONS = ['capture-leader', 'capture-all'] as const;
+
+/**
+ * Minimal shape validation for data loaded from localStorage.
+ * Returns null for corrupt/incompatible data instead of trusting it blindly.
+ */
+function validateSavedData(data: unknown): SavedGameData | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const d = data as Record<string, unknown>;
+
+  const gameState = d.gameState as GameState | null | undefined;
+  if (gameState !== null && gameState !== undefined) {
+    if (
+      !Array.isArray(gameState.board) ||
+      (gameState.currentPlayer !== 'white' && gameState.currentPlayer !== 'black') ||
+      !Array.isArray(gameState.moveHistory) ||
+      typeof gameState.boardSize?.rows !== 'number' ||
+      typeof gameState.boardSize?.cols !== 'number'
+    ) {
+      return null;
+    }
+  }
+
+  return {
+    gameState: gameState ?? null,
+    gameStarted: d.gameStarted === true,
+    vsAI: d.vsAI === true,
+    aiProfile: AI_PROFILES.includes(d.aiProfile as AIProfile) ? (d.aiProfile as AIProfile) : 'bloodthirsty',
+    moveMode: MOVE_MODES.includes(d.moveMode as never) ? (d.moveMode as SavedGameData['moveMode']) : 'capture-first',
+    victoryCondition: VICTORY_CONDITIONS.includes(d.victoryCondition as never)
+      ? (d.victoryCondition as VictoryCondition)
+      : 'capture-leader',
+    selectedBoardPreset: typeof d.selectedBoardPreset === 'string' ? d.selectedBoardPreset : classicBoardPreset.id,
+    lastMove: (d.lastMove as SavedGameData['lastMove']) ?? null,
+    hoverMovesEnabled: d.hoverMovesEnabled !== false,
+    debugPanelEnabled: d.debugPanelEnabled === true,
+  };
 }
 
 function loadSavedGame(): SavedGameData | null {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
-      return JSON.parse(saved) as SavedGameData;
+      return validateSavedData(JSON.parse(saved));
     }
   } catch (e) {
     console.warn('Failed to load saved game:', e);
@@ -63,145 +106,6 @@ function clearSavedGame(): void {
   }
 }
 
-// Confirmation modal for leaving game
-function SetupConfirmModal({ isOpen, onConfirm, onCancel }: { isOpen: boolean; onConfirm: () => void; onCancel: () => void }) {
-  if (!isOpen) return null;
-  
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 1000,
-      }}
-      onClick={onCancel}
-    >
-      <div
-        style={{
-          backgroundColor: '#f5f0e1',
-          borderRadius: '12px',
-          border: '2px solid #3d2914',
-          padding: 32,
-          maxWidth: 400,
-          width: '90%',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-          textAlign: 'center',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: '0 0 16px', color: '#3d2914', fontSize: '1.3rem' }}>Return to Setup?</h3>
-        <p style={{ margin: '0 0 24px', color: '#555', lineHeight: 1.5 }}>You have an active game in progress. Are you sure you want to return to game setup? Your current game will be lost.</p>
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-          <button
-            onClick={onCancel}
-            style={{
-              padding: '12px 24px',
-              fontSize: '1rem',
-              fontWeight: 'bold',
-              backgroundColor: '#8b7355',
-              color: '#f5f0e1',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            style={{
-              padding: '12px 24px',
-              fontSize: '1rem',
-              fontWeight: 'bold',
-              backgroundColor: '#c0392b',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
-          >
-            Yes, Return to Setup
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Settings modal for in-game options
-function SettingsModal({ isOpen, onClose, hoverMovesEnabled, onHoverMovesToggle }: { isOpen: boolean; onClose: () => void; hoverMovesEnabled: boolean; onHoverMovesToggle: () => void }) {
-  if (!isOpen) return null;
-  
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 1000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          backgroundColor: '#f5f0e1',
-          borderRadius: '12px',
-          border: '2px solid #3d2914',
-          padding: 32,
-          maxWidth: 360,
-          width: '90%',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-          textAlign: 'left',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: '0 0 24px', color: '#3d2914', fontSize: '1.3rem', textAlign: 'center' }}>⚙️ Settings</h3>
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', fontSize: '1rem', color: '#3d2914' }}>
-            <input
-              type="checkbox"
-              checked={hoverMovesEnabled}
-              onChange={onHoverMovesToggle}
-              style={{ width: 20, height: 20, accentColor: '#3d2914' }}
-            />
-            <span>Show Move Preview on Hover</span>
-          </label>
-          <p style={{ margin: '8px 0 0', fontSize: '0.85rem', color: '#666' }}>When enabled, hovering a piece shows its possible moves (amber dots for moves, red rings for captures).</p>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '10px 20px',
-              fontSize: '1rem',
-              fontWeight: 'bold',
-              backgroundColor: '#8b7355',
-              color: '#f5f0e1',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 const App = () => {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [vsAI, setVsAI] = useState(true);
@@ -215,6 +119,7 @@ const App = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [hoverMovesEnabled, setHoverMovesEnabled] = useState(true);
+  const [debugPanelEnabled, setDebugPanelEnabled] = useState(false);
 
   // Get responsive square size for board and captured pieces
   const { squareSize } = useResponsiveBoard({
@@ -234,7 +139,8 @@ const App = () => {
       setVictoryCondition(saved.victoryCondition);
       setSelectedBoardPreset(saved.selectedBoardPreset);
       setLastMove(saved.lastMove);
-      setHoverMovesEnabled(saved.hoverMovesEnabled ?? true);
+      setHoverMovesEnabled(saved.hoverMovesEnabled);
+      setDebugPanelEnabled(saved.debugPanelEnabled);
     }
     setHydrated(true);
   }, []);
@@ -242,7 +148,7 @@ const App = () => {
   // Save game whenever relevant state changes
   useEffect(() => {
     if (!hydrated) return;
-    
+
     const data: SavedGameData = {
       gameState,
       gameStarted,
@@ -253,76 +159,52 @@ const App = () => {
       selectedBoardPreset,
       lastMove,
       hoverMovesEnabled,
+      debugPanelEnabled,
     };
     saveGame(data);
-  }, [hydrated, gameState, gameStarted, vsAI, aiProfile, moveMode, victoryCondition, selectedBoardPreset, lastMove, hoverMovesEnabled]);
+  }, [hydrated, gameState, gameStarted, vsAI, aiProfile, moveMode, victoryCondition, selectedBoardPreset, lastMove, hoverMovesEnabled, debugPanelEnabled]);
 
   // Clear animation after it completes
+  const animatingMove = gameState?.animatingMove;
   useEffect(() => {
-    if (gameState?.animatingMove) {
-      const duration = gameState.animatingMove.duration;
+    if (animatingMove) {
       const timer = setTimeout(() => {
-        setGameState(prev => prev ? { ...prev, animatingMove: null } : null);
-      }, duration + 50); // Small buffer
+        setGameState(prev => (prev?.animatingMove ? { ...prev, animatingMove: null } : prev));
+      }, animatingMove.duration + 50); // Small buffer
       return () => clearTimeout(timer);
     }
-  }, [gameState?.animatingMove?.startTime]);
+  }, [animatingMove]);
 
-  // Handle AI moves
+  // Handle AI moves (updater stays pure: no side effects, no randomness
+  // outside the updater so StrictMode double-invocation stays consistent)
+  const isAITurn = !!gameState && !gameState.gameOver && vsAI && gameState.currentPlayer === 'black';
   useEffect(() => {
-    if (!gameState || gameState.gameOver) return;
-    
-    const isAITurn = vsAI && gameState.currentPlayer === 'black';
-    
-    if (isAITurn) {
-      const timer = setTimeout(() => {
-        setGameState(prev => {
-          if (!prev) return null;
-          const newState = makeAIMove(prev, aiProfile);
-          if (newState.moveHistory.length > prev.moveHistory.length) {
-            const move = newState.moveHistory[newState.moveHistory.length - 1];
-            setLastMove({ from: move.from, to: move.to });
-          }
-          return newState;
-        });
-      }, 300);
+    if (!isAITurn) return;
 
-      return () => clearTimeout(timer);
-    }
-  }, [gameState?.currentPlayer, gameState?.gameOver, gameState?.moveHistory.length, vsAI, aiProfile]);
+    const timer = setTimeout(() => {
+      setGameState(prev => (prev && !prev.gameOver ? makeAIMove(prev, aiProfile) : prev));
+    }, 300);
 
-  // Update move mode when it changes
+    return () => clearTimeout(timer);
+  }, [isAITurn, aiProfile]);
+
+  // Track the last move for board highlighting
+  const lastMoveInHistory = gameState?.moveHistory[gameState.moveHistory.length - 1];
   useEffect(() => {
-    if (gameState) {
-      setGameState(prev => prev ? { ...prev, moveMode } : null);
+    if (lastMoveInHistory) {
+      setLastMove({ from: lastMoveInHistory.from, to: lastMoveInHistory.to });
     }
-  }, [moveMode]);
-
-  useEffect(() => {
-    if (gameState) {
-      setGameState(prev => prev ? { ...prev, victoryCondition } : null);
-    }
-  }, [victoryCondition]);
+  }, [lastMoveInHistory]);
 
   const handleSquareClick = useCallback((position: Position) => {
     setGameState(prev => {
-      if (!prev) return null;
-      // If a piece is already selected, deselect it
-      if (prev.selectedPiece) {
-        return deselectPiece(prev);
-      }
-
-      // No piece selected, try to select and make a random move
+      if (!prev || prev.gameOver) return prev;
       const piece = getPiece(prev, position);
       if (piece && piece.color === prev.currentPlayer) {
         return makeRandomMoveForPiece(prev, position);
       }
       return prev;
     });
-  }, []);
-
-  const handleAIProfileChange = useCallback((profile: string) => {
-    setAIProfile(profile as AIProfile);
   }, []);
 
   const handleStartGame = useCallback(() => {
@@ -359,67 +241,32 @@ const App = () => {
     clearSavedGame();
   }, []);
 
-  const handleBoardPresetChange = useCallback((presetId: string) => {
-    setSelectedBoardPreset(presetId);
-  }, []);
-
   if (!hydrated) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#e8e0d0',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-      }}>
-        <div style={{ color: '#666', fontSize: '1.1rem' }}>Loading game...</div>
+      <div className="app-root app-center">
+        <div className="app-loading">Loading game...</div>
       </div>
     );
   }
 
   if (!gameStarted) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#e8e0d0',
-        padding: 20,
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}>
-        <div style={{
-          maxWidth: 500,
-          width: '100%',
-          backgroundColor: '#f5f0e1',
-          borderRadius: '12px',
-          border: '2px solid #3d2914',
-          padding: 32,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        }}>
-          <header style={{ textAlign: 'center', marginBottom: 32 }}>
-            <h1 style={{ margin: 0, color: '#3d2914', fontSize: '2.5rem' }}>♟ Rebel Chess</h1>
-            <p style={{ margin: '8px 0 0', color: '#666' }}>Capture the Leader to win!</p>
+      <div className="app-root app-center">
+        <div className="setup-panel">
+          <header className="setup-header">
+            <h1>♟ Rebel Chess</h1>
+            <p>Capture the Leader to win!</p>
           </header>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div className="setup-form">
             <div>
-              <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 'bold', marginBottom: 8, color: '#3d2914' }}>
+              <label className="field-label" htmlFor="board-preset">
                 Board Preset
               </label>
-              <select 
-                value={selectedBoardPreset} 
-                onChange={(e) => handleBoardPresetChange(e.target.value)}
-                style={{ 
-                  width: '100%',
-                  padding: '12px 16px', 
-                  fontSize: '1rem',
-                  border: '2px solid #3d2914',
-                  borderRadius: '6px',
-                  backgroundColor: '#fff',
-                  color: '#3d2914',
-                }}
+              <select
+                id="board-preset"
+                value={selectedBoardPreset}
+                onChange={(e) => setSelectedBoardPreset(e.target.value)}
               >
                 <optgroup label="Standard">
                   {boardPresets
@@ -470,21 +317,13 @@ const App = () => {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 'bold', marginBottom: 8, color: '#3d2914' }}>
+              <label className="field-label" htmlFor="move-mode">
                 Move Mode
               </label>
-              <select 
-                value={moveMode} 
+              <select
+                id="move-mode"
+                value={moveMode}
                 onChange={(e) => setMoveMode(e.target.value as 'regular' | 'capture-first')}
-                style={{ 
-                  width: '100%',
-                  padding: '12px 16px', 
-                  fontSize: '1rem',
-                  border: '2px solid #3d2914',
-                  borderRadius: '6px',
-                  backgroundColor: '#fff',
-                  color: '#3d2914',
-                }}
               >
                 <option value="regular">Regular - Any valid move</option>
                 <option value="capture-first">Capture First - Must capture if possible</option>
@@ -492,19 +331,13 @@ const App = () => {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 'bold', marginBottom: 8, color: '#3d2914' }}>                Victory Condition              </label>
-              <select 
-                value={victoryCondition} 
+              <label className="field-label" htmlFor="victory-condition">
+                Victory Condition
+              </label>
+              <select
+                id="victory-condition"
+                value={victoryCondition}
                 onChange={(e) => setVictoryCondition(e.target.value as VictoryCondition)}
-                style={{ 
-                  width: '100%',
-                  padding: '12px 16px', 
-                  fontSize: '1rem',
-                  border: '2px solid #3d2914',
-                  borderRadius: '6px',
-                  backgroundColor: '#fff',
-                  color: '#3d2914',
-                }}
               >
                 <option value="capture-leader">Capture Leader - Win by capturing the Leader piece</option>
                 <option value="capture-all">Capture All - Win by capturing all opponent pieces</option>
@@ -512,12 +345,11 @@ const App = () => {
             </div>
 
             <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: '1rem', color: '#3d2914' }}>
+              <label className="checkbox-label">
                 <input
                   type="checkbox"
                   checked={vsAI}
                   onChange={(e) => setVsAI(e.target.checked)}
-                  style={{ width: 20, height: 20, accentColor: '#3d2914' }}
                 />
                 <span>Play vs AI (You play White)</span>
               </label>
@@ -525,21 +357,13 @@ const App = () => {
 
             {vsAI && (
               <div>
-                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 'bold', marginBottom: 8, color: '#3d2914' }}>
+                <label className="field-label" htmlFor="ai-profile">
                   AI Profile
                 </label>
-                <select 
-                  value={aiProfile} 
-                  onChange={(e) => handleAIProfileChange(e.target.value)}
-                  style={{ 
-                    width: '100%',
-                    padding: '12px 16px', 
-                    fontSize: '1rem',
-                    border: '2px solid #3d2914',
-                    borderRadius: '6px',
-                    backgroundColor: '#fff',
-                    color: '#3d2914',
-                  }}
+                <select
+                  id="ai-profile"
+                  value={aiProfile}
+                  onChange={(e) => setAIProfile(e.target.value as AIProfile)}
                 >
                   <option value="bloodthirsty">🩸 Bloodthirsty - Prefers captures</option>
                   <option value="random">🎲 Random - Fully random moves</option>
@@ -547,24 +371,7 @@ const App = () => {
               </div>
             )}
 
-            <button 
-              onClick={handleStartGame}
-              style={{
-                width: '100%',
-                padding: '16px 24px',
-                fontSize: '1.1rem',
-                fontWeight: 'bold',
-                backgroundColor: '#3d2914',
-                color: '#f5f0e1',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                marginTop: 8,
-                transition: 'background-color 0.2s, transform 0.1s',
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#5a3d29'; }}
-              onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#3d2914'; }}
-            >
+            <button className="btn btn-primary btn-start" onClick={handleStartGame}>
               🎮 Start Game
             </button>
           </div>
@@ -574,81 +381,37 @@ const App = () => {
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      backgroundColor: '#e8e0d0',
-      padding: 20,
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-    }}>
-      <div style={{ maxWidth: '100%', margin: '0 auto' }}>
-        <header style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: 20,
-          flexWrap: 'wrap',
-          gap: 16,
-        }}>
+    <div className="app-root">
+      <div className="app-container">
+        <header className="app-header">
           <div>
-            <h1 style={{ margin: 0, color: '#3d2914', fontSize: '2rem' }}>♟ Rebel Chess</h1>
-            <p style={{ margin: '4px 0 0', color: '#666' }}>Capture the Leader to win!</p>
+            <h1>♟ Rebel Chess</h1>
+            <p className="app-tagline">Capture the Leader to win!</p>
           </div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <button 
-              onClick={handleBackToSetup}
-              style={{
-                padding: '10px 20px',
-                fontSize: '0.9rem',
-                fontWeight: 'bold',
-                backgroundColor: '#8b7355',
-                color: '#f5f0e1',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s',
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#a68a6b'; }}
-              onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#8b7355'; }}
-            >
+          <div className="header-actions">
+            <button className="btn" onClick={handleBackToSetup}>
               ↩️ Return to Game Setup
             </button>
-            <button 
+            <button
+              className="btn btn-icon"
               onClick={() => setShowSettings(true)}
-              style={{
-                padding: '10px 16px',
-                fontSize: '1.3rem',
-                fontWeight: 'bold',
-                backgroundColor: '#8b7355',
-                color: '#f5f0e1',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#a68a6b'; }}
-              onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#8b7355'; }}
               aria-label="Settings"
             >
-              <span style={{ fontSize: '1rem' }}>⚙️</span>
+              ⚙️
             </button>
           </div>
         </header>
 
         {gameState && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>            <GameStatus state={gameState} />
-            
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <div className="game-layout">
+            <GameStatus state={gameState} />
+
+            <div className="board-wrapper">
               <Board
                 board={gameState.board}
                 boardSize={gameState.boardSize}
                 squareSize={squareSize}
-                selectedPiece={gameState.selectedPiece}
-                validMoves={gameState.validMoves}
                 lastMove={lastMove}
-                checkPosition={null}
                 onSquareClick={handleSquareClick}
                 showLeaderIndicator={gameState.victoryCondition === 'capture-leader'}
                 pieceDefinitions={gameState.pieceDefinitions}
@@ -657,6 +420,8 @@ const App = () => {
               />
             </div>
 
+            {debugPanelEnabled && <DebugStatePanel gameState={gameState} />}
+
             <CapturedPieces
               capturedWhite={gameState.capturedPieces.white}
               capturedBlack={gameState.capturedPieces.black}
@@ -664,10 +429,7 @@ const App = () => {
               pieceDefinitions={gameState.pieceDefinitions}
             />
 
-            <MoveHistory
-              moves={gameState.moveHistory}
-              onMoveClick={() => {}}
-            />
+            <MoveHistory moves={gameState.moveHistory} />
           </div>
         )}
 
@@ -681,6 +443,8 @@ const App = () => {
           onClose={() => setShowSettings(false)}
           hoverMovesEnabled={hoverMovesEnabled}
           onHoverMovesToggle={() => setHoverMovesEnabled(!hoverMovesEnabled)}
+          debugPanelEnabled={debugPanelEnabled}
+          onDebugPanelToggle={() => setDebugPanelEnabled(!debugPanelEnabled)}
         />
       </div>
     </div>

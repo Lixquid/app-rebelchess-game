@@ -3,7 +3,7 @@
  * Calculates square size based on viewport width and board columns
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface UseResponsiveBoardOptions {
   boardCols: number;
@@ -22,34 +22,27 @@ export function useResponsiveBoard({
   minSquareSize = 30,
   maxSquareSize = 80,
 }: UseResponsiveBoardOptions): UseResponsiveBoardResult {
-  const [squareSize, setSquareSize] = useState<number>(() => {
-    // Initial calculation - will be updated on mount
-    if (typeof window !== 'undefined') {
-      const viewportWidth = window.innerWidth;
-      const availableWidth = Math.min(viewportWidth - 40, maxWidth);
-      return Math.max(minSquareSize, Math.min(maxSquareSize, availableWidth / boardCols));
-    }
-    return minSquareSize;
-  });
+  const calculateSquareSize = useCallback((): number => {
+    if (typeof window === 'undefined') return minSquareSize;
+    const viewportWidth = window.innerWidth;
+    const availableWidth = Math.min(viewportWidth - 40, maxWidth);
+    const calculated = availableWidth / boardCols;
+    return Math.max(minSquareSize, Math.min(maxSquareSize, calculated));
+  }, [boardCols, maxWidth, minSquareSize, maxSquareSize]);
+
+  const [squareSize, setSquareSize] = useState<number>(calculateSquareSize);
 
   useEffect(() => {
-    const calculateSquareSize = () => {
-      const viewportWidth = window.innerWidth;
-      const availableWidth = Math.min(viewportWidth - 40, maxWidth);
-      const calculated = availableWidth / boardCols;
-      setSquareSize(Math.max(minSquareSize, Math.min(maxSquareSize, calculated)));
-    };
+    const onResize = () => setSquareSize(calculateSquareSize());
 
-    // Initial calculation
-    calculateSquareSize();
-
-    // Listen for resize
-    window.addEventListener('resize', calculateSquareSize);
+    // Recalculate whenever the inputs change, then listen for resizes
+    onResize();
+    window.addEventListener('resize', onResize);
 
     return () => {
-      window.removeEventListener('resize', calculateSquareSize);
+      window.removeEventListener('resize', onResize);
     };
-  }, [boardCols, maxWidth, minSquareSize, maxSquareSize]);
+  }, [calculateSquareSize]);
 
   return { squareSize };
 }

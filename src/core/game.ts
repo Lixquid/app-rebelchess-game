@@ -7,9 +7,9 @@ import type {
   GameConfig,
   Position,
   Piece,
+  PieceDefinitions,
   Move,
   AIProfile,
-  AIConfig,
 } from './types';
 import {
   defaultPieceDefinitions,
@@ -17,8 +17,6 @@ import {
   checkGameOver,
   isPromotionMove,
   promotePawn,
-  getAllValidMovesForPlayer,
-  filterCaptureMoves,
   oppositeColor,
   getPieceAt,
 } from './pieces';
@@ -30,43 +28,63 @@ import {
 } from './board';
 import { makeAIMove as aiMakeMove } from './ai';
 
+/** Animation duration in milliseconds */
+const ANIMATION_DURATION = 300;
+
+/**
+ * Creates a deep copy of the piece definitions so leader-flag changes
+ * for one game never leak into the shared defaults or other games.
+ */
+const clonePieceDefinitions = (
+  pieceDefinitions: PieceDefinitions
+): PieceDefinitions => {
+  const clone = {} as PieceDefinitions;
+  for (const key of Object.keys(pieceDefinitions) as (keyof PieceDefinitions)[]) {
+    clone[key] = { ...pieceDefinitions[key], moves: pieceDefinitions[key].moves.map(m => ({ ...m })) };
+  }
+  return clone;
+};
+
+/**
+ * Applies the leader type configuration to a piece definitions object
+ */
+const applyLeaderType = (
+  pieceDefinitions: PieceDefinitions,
+  leaderType?: GameConfig['leaderType'],
+  customLeaderType?: Piece['type']
+): void => {
+  // Reset to default first: only the king is a leader
+  for (const def of Object.values(pieceDefinitions)) {
+    def.isLeader = def.type === 'king';
+  }
+
+  if (leaderType === 'custom' && customLeaderType) {
+    pieceDefinitions[customLeaderType].isLeader = true;
+    pieceDefinitions.king.isLeader = false;
+  } else if (leaderType === 'queen') {
+    pieceDefinitions.queen.isLeader = true;
+    pieceDefinitions.king.isLeader = false;
+  }
+};
+
 /**
  * Creates a new game state with the given configuration
  */
 export const createGameState = (config: GameConfig): GameState => {
-  console.log('[createGameState] Creating new game state with config:', config);
   const boardSize = config.boardSize || { rows: 8, cols: 8 };
-  const pieceDefinitions = config.pieceDefinitions || defaultPieceDefinitions;
+  // Always clone so we never mutate the shared defaults (or caller's object)
+  const pieceDefinitions = clonePieceDefinitions(
+    config.pieceDefinitions || defaultPieceDefinitions
+  );
   const initialSetup = config.initialSetup;
-  
-  let board: (Piece | null)[][];
-  
-  if (initialSetup && initialSetup.length > 0) {
-    console.log('[createGameState] Using custom initial setup');
-    board = createBoardFromSetup(initialSetup, boardSize);
-  } else {
-    console.log('[createGameState] Using default board setup');
-    board = createDefaultBoard(boardSize);
-  }
 
-  // Apply leader type configuration
-  if (config.leaderType === 'custom' && config.customLeaderType) {
-    console.log('[createGameState] Setting custom leader type:', config.customLeaderType);
-    pieceDefinitions[config.customLeaderType].isLeader = true;
-    if (config.customLeaderType !== 'king') {
-      pieceDefinitions.king.isLeader = false;
-    }
-  } else if (config.leaderType === 'queen') {
-    console.log('[createGameState] Setting queen as leader');
-    pieceDefinitions.queen.isLeader = true;
-    pieceDefinitions.king.isLeader = false;
-  } else {
-    console.log('[createGameState] Setting king as leader (default)');
-    pieceDefinitions.king.isLeader = true;
-    pieceDefinitions.queen.isLeader = false;
-  }
+  const board = initialSetup && initialSetup.length > 0
+    ? createBoardFromSetup(initialSetup, boardSize)
+    : createDefaultBoard(boardSize);
 
-  const newState: GameState = {
+  applyLeaderType(pieceDefinitions, config.leaderType, config.customLeaderType);
+
+  return {
     board,
     currentPlayer: 'white',
     boardSize,
@@ -77,111 +95,28 @@ export const createGameState = (config: GameConfig): GameState => {
     capturedPieces: { white: [], black: [] },
     moveMode: config.moveMode || 'regular',
     victoryCondition: config.victoryCondition || 'capture-leader',
-    selectedPiece: null,
-    validMoves: [],
-    status: 'playing',
   };
-  console.log('[createGameState] Game state created:', {
-    currentPlayer: newState.currentPlayer,
-    boardSize: newState.boardSize,
-    moveMode: newState.moveMode,
-    pieceCount: board.flat().filter(p => p !== null).length
+};
+
+/**
+ * Applies capture-first filtering to the moves of an already-selected piece:
+ * if the chosen piece has any capture available, its non-capture moves are
+ * removed. This constrains how the piece moves after selection — it never
+ * restricts which piece can be picked — and applies identically to human
+ * and AI moves.
+ */
+const applyCaptureFirstFilter = (
+  state: GameState,
+  moves: Position[]
+): Position[] => {
+  if (state.moveMode !== 'capture-first' || moves.length === 0) {
+    return moves;
+  }
+  const captures = moves.filter(m => {
+    const target = state.board[m.row][m.col];
+    return target !== null && target.color !== state.currentPlayer;
   });
-  return newState;
-};
-
-/**
- * Selects a piece and shows its valid moves
- */
-export const selectPiece = (
-  state: GameState,
-  position: Position
-): GameState => {
-  console.log('[selectPiece] Called with position:', position);
-  const piece = getPieceAt(state.board, position);
-  console.log('[selectPiece] Piece at position:', piece);
-  
-  if (!piece || piece.color !== state.currentPlayer) {
-    console.log('[selectPiece] No valid piece or wrong color, returning deselected state');
-    return { ...state, selectedPiece: null, validMoves: [] };
-  }
-
-  const validMoves = getValidMovesForPiece(
-    state.board,
-    piece,
-    position,
-    state.pieceDefinitions,
-    state.boardSize
-  );
-  console.log('[selectPiece] All valid moves for piece:', validMoves);
-
-  // Filter moves based on move mode
-  let filteredMoves = validMoves;
-  if (state.moveMode === 'capture-first') {
-    console.log('[selectPiece] Capture-first mode enabled, filtering moves');
-    const allMoves = getAllValidMovesForPlayer(
-      state.board,
-      state.currentPlayer,
-      state.pieceDefinitions,
-      state.boardSize
-    );
-    const pieceMoves = allMoves.filter(m => 
-      m.from.row === position.row && m.from.col === position.col
-    );
-    const captureMoves = filterCaptureMoves(state.board, pieceMoves, state.currentPlayer);
-    console.log('[selectPiece] Capture moves available:', captureMoves);
-    if (captureMoves.length > 0) {
-      filteredMoves = captureMoves.map(m => m.to);
-      console.log('[selectPiece] Filtered to capture moves only:', filteredMoves);
-    }
-  }
-
-  const newState = {
-    ...state,
-    selectedPiece: position,
-    validMoves: filteredMoves,
-  };
-  console.log('[selectPiece] Returning new state with selectedPiece and validMoves');
-  return newState;
-};
-
-/**
- * Deselects the currently selected piece
- */
-export const deselectPiece = (state: GameState): GameState => {
-  console.log('[deselectPiece] Deselecting piece, clearing validMoves');
-  return { ...state, selectedPiece: null, validMoves: [] };
-};
-
-/**
- * Makes a move for the current player (used by human players after selecting a piece)
- */
-export const makeMove = (
-  state: GameState,
-  from: Position,
-  to: Position
-): GameState => {
-  console.log('[makeMove] Called with from:', from, 'to:', to);
-  console.log('[makeMove] Current player:', state.currentPlayer, 'validMoves:', state.validMoves);
-  const piece = getPieceAt(state.board, from);
-  if (!piece || piece.color !== state.currentPlayer) {
-    console.log('[makeMove] No piece or wrong color at from position');
-    return state;
-  }
-
-  // Check if target is a valid move
-  const isValidMove = state.validMoves.some(
-    move => move.row === to.row && move.col === to.col
-  );
-  console.log('[makeMove] isValidMove check:', isValidMove);
-
-  if (!isValidMove) {
-    console.log('[makeMove] Invalid move, returning state unchanged');
-    return state;
-  }
-
-  console.log('[makeMove] Move is valid, executing...');
-  return executeMove(state, from, to, piece);
+  return captures.length > 0 ? captures : moves;
 };
 
 /**
@@ -194,20 +129,15 @@ export const executeMove = (
   to: Position,
   piece: Piece
 ): GameState => {
-  console.log('[executeMove] Executing move from:', from, 'to:', to, 'piece:', piece.type, piece.color);
-  // Make the move
   const newBoard = cloneBoard(state.board);
   const capturedPiece = movePiece(newBoard, from, to);
-  console.log('[executeMove] Captured piece:', capturedPiece);
-  
+
   // Handle pawn promotion
   const movedPiece = getPieceAt(newBoard, to);
   if (movedPiece && isPromotionMove(movedPiece, to, state.boardSize)) {
-    console.log('[executeMove] Pawn promotion at:', to);
     promotePawn(newBoard, to, 'queen');
   }
 
-  // Create move record
   const move: Move = {
     from: { ...from },
     to: { ...to },
@@ -215,26 +145,24 @@ export const executeMove = (
     capturedPiece: capturedPiece ? { ...capturedPiece } : undefined,
     timestamp: Date.now(),
   };
-  console.log('[executeMove] Move record created:', move);
 
   // Update captured pieces
   const newCapturedPieces = { ...state.capturedPieces };
   if (capturedPiece) {
-    const color = capturedPiece.color === 'white' ? 'white' : 'black';
+    const color = capturedPiece.color;
     newCapturedPieces[color] = [...newCapturedPieces[color], { ...capturedPiece }];
-    console.log('[executeMove] Updated captured pieces:', newCapturedPieces);
   }
 
   // Check for game over
   const nextPlayer = oppositeColor(state.currentPlayer);
-  const { gameOver, winner } = checkGameOver(newBoard, state.pieceDefinitions, state.victoryCondition, nextPlayer);
-  console.log('[executeMove] Game over check:', { gameOver, winner });
-  console.log('[executeMove] Next player:', nextPlayer);
+  const { gameOver, winner } = checkGameOver(
+    newBoard,
+    state.pieceDefinitions,
+    state.victoryCondition,
+    nextPlayer
+  );
 
-  // Animation duration in milliseconds
-  const ANIMATION_DURATION = 300;
-
-  const newState: GameState = {
+  return {
     ...state,
     board: newBoard,
     currentPlayer: nextPlayer,
@@ -242,9 +170,6 @@ export const executeMove = (
     capturedPieces: newCapturedPieces,
     gameOver,
     winner,
-    selectedPiece: null,
-    validMoves: [],
-    status: gameOver ? (winner === 'draw' ? 'draw' : 'checkmate') : 'playing',
     animatingMove: {
       piece: { ...piece },
       from: { ...from },
@@ -253,97 +178,6 @@ export const executeMove = (
       duration: ANIMATION_DURATION,
     },
   };
-  console.log('[executeMove] Returning new state, move history length:', newState.moveHistory.length);
-  return newState;
-};
-
-/**
- * Makes a random move for the current player
- */
-export const makeRandomMove = (state: GameState): GameState => {
-  console.log('[makeRandomMove] Called, currentPlayer:', state.currentPlayer, 'gameOver:', state.gameOver);
-  if (state.gameOver) return state;
-
-  const allMoves = getAllValidMovesForPlayer(
-    state.board,
-    state.currentPlayer,
-    state.pieceDefinitions,
-    state.boardSize
-  );
-  console.log('[makeRandomMove] All valid moves for player:', allMoves.length);
-
-  if (allMoves.length === 0) {
-    console.log('[makeRandomMove] No valid moves, checking game over');
-    const { gameOver, winner } = checkGameOver(state.board, state.pieceDefinitions, state.victoryCondition, state.currentPlayer);
-    return { ...state, gameOver, winner };
-  }
-
-  // Filter based on move mode
-  let movesToChoose = allMoves;
-  if (state.moveMode === 'capture-first') {
-    console.log('[makeRandomMove] Capture-first mode, filtering for captures');
-    const captureMoves = filterCaptureMoves(state.board, allMoves, state.currentPlayer);
-    if (captureMoves.length > 0) {
-      movesToChoose = captureMoves;
-      console.log('[makeRandomMove] Capture moves available:', captureMoves.length);
-    }
-  }
-
-  const randomMove = movesToChoose[Math.floor(Math.random() * movesToChoose.length)];
-  console.log('[makeRandomMove] Selected random move:', randomMove);
-  
-  const piece = getPieceAt(state.board, randomMove.from);
-  console.log('[makeRandomMove] Piece to move:', piece);
-  return executeMove(state, randomMove.from, randomMove.to, piece!);
-};
-
-/**
- * Makes an AI move
- */
-export const makeAIMove = (
-  state: GameState,
-  profile: AIProfile = 'bloodthirsty'
-): GameState => {
-  console.log('[makeAIMove] Called with profile:', profile, 'currentPlayer:', state.currentPlayer);
-  if (state.gameOver) return state;
-
-  const config: AIConfig = { profile };
-  const result = aiMakeMove(
-    state.board,
-    state.currentPlayer,
-    state.pieceDefinitions,
-    state.boardSize,
-    config
-  );
-  console.log('[makeAIMove] AI move result:', result);
-
-  if (!result) {
-    console.log('[makeAIMove] No AI move returned, checking game over');
-    const { gameOver, winner } = checkGameOver(state.board, state.pieceDefinitions, state.victoryCondition, state.currentPlayer);
-    return { ...state, gameOver, winner };
-  }
-
-  return executeMove(state, result.from, result.to, result.piece);
-};
-
-/**
- * Gets all valid moves for the current player
- */
-export const getCurrentPlayerMoves = (state: GameState): Move[] => {
-  const allMoves = getAllValidMovesForPlayer(
-    state.board,
-    state.currentPlayer,
-    state.pieceDefinitions,
-    state.boardSize
-  );
-  
-  return allMoves.map(m => ({
-    from: m.from,
-    to: m.to,
-    piece: m.piece,
-    capturedPiece: state.board[m.to.row][m.to.col] || undefined,
-    timestamp: 0,
-  }));
 };
 
 /**
@@ -353,59 +187,65 @@ export const makeRandomMoveForPiece = (
   state: GameState,
   from: Position
 ): GameState => {
-  console.log('[makeRandomMoveForPiece] Called with from:', from, 'currentPlayer:', state.currentPlayer);
   if (state.gameOver) return state;
 
   const piece = getPieceAt(state.board, from);
-  console.log('[makeRandomMoveForPiece] Piece at from position:', piece);
   if (!piece || piece.color !== state.currentPlayer) {
-    console.log('[makeRandomMoveForPiece] No piece or wrong color, returning state');
     return state;
   }
 
-  let validMoves = getValidMovesForPiece(
+  const validMoves = applyCaptureFirstFilter(state, getValidMovesForPiece(
     state.board,
     piece,
     from,
     state.pieceDefinitions,
     state.boardSize
-  );
-  console.log('[makeRandomMoveForPiece] All valid moves for piece:', validMoves);
-
-  // Filter based on move mode
-  if (state.moveMode === 'capture-first') {
-    console.log('[makeRandomMoveForPiece] Capture-first mode enabled');
-    const allMoves = getAllValidMovesForPlayer(
-      state.board,
-      state.currentPlayer,
-      state.pieceDefinitions,
-      state.boardSize
-    );
-    const pieceMoves = allMoves.filter(m =>
-      m.from.row === from.row && m.from.col === from.col
-    );
-    const captureMoves = filterCaptureMoves(state.board, pieceMoves, state.currentPlayer);
-    if (captureMoves.length > 0) {
-      validMoves = captureMoves.map(m => m.to);
-      console.log('[makeRandomMoveForPiece] Filtered to capture moves only:', validMoves);
-    }
-  }
+  ));
 
   if (validMoves.length === 0) {
-    console.log('[makeRandomMoveForPiece] No valid moves, returning state');
-    return { ...state, selectedPiece: null, validMoves: [] };
+    return state;
   }
 
   const randomTo = validMoves[Math.floor(Math.random() * validMoves.length)];
-  console.log('[makeRandomMoveForPiece] Selected random move to:', randomTo);
   return executeMove(state, from, randomTo, piece);
 };
 
 /**
- * Resets the game to initial state
+ * Makes an AI move
  */
-export const resetGame = (config: GameConfig): GameState => {
-  return createGameState(config);
+export const makeAIMove = (
+  state: GameState,
+  profile: AIProfile = 'bloodthirsty'
+): GameState => {
+  if (state.gameOver) return state;
+
+  // Capture-first mode constrains the AI, not the human player
+  const result = aiMakeMove(
+    state.board,
+    state.currentPlayer,
+    state.pieceDefinitions,
+    state.boardSize,
+    { profile, captureFirst: state.moveMode === 'capture-first' }
+  );
+
+  if (!result) {
+    const { gameOver, winner } = checkGameOver(
+      state.board,
+      state.pieceDefinitions,
+      state.victoryCondition,
+      state.currentPlayer
+    );
+    return { ...state, gameOver, winner };
+  }
+
+  return executeMove(state, result.from, result.to, result.piece);
+};
+
+/**
+ * Gets a piece at a position
+ */
+export const getPiece = (state: GameState, position: Position): Piece | null => {
+  return getPieceAt(state.board, position);
 };
 
 /**
@@ -418,59 +258,7 @@ export const getGameStatusText = (state: GameState): string => {
     }
     return `Game Over - ${state.winner === 'white' ? 'White' : 'Black'} Wins!`;
   }
-  
-  if (state.status === 'check') {
-    return `${state.currentPlayer === 'white' ? 'White' : 'Black'} is in check!`;
-  }
-  
   return `${state.currentPlayer === 'white' ? 'White' : 'Black'} to move`;
-};
-
-/**
- * Checks if a move is valid in the current state
- */
-export const isValidMove = (
-  state: GameState,
-  from: Position,
-  to: Position
-): boolean => {
-  const piece = getPieceAt(state.board, from);
-  if (!piece || piece.color !== state.currentPlayer) {
-    return false;
-  }
-  
-  const validMoves = getValidMovesForPiece(
-    state.board,
-    piece,
-    from,
-    state.pieceDefinitions,
-    state.boardSize
-  );
-  return validMoves.some(m => m.row === to.row && m.col === to.col);
-};
-
-/**
- * Gets a piece at a position
- */
-export const getPiece = (state: GameState, position: Position): Piece | null => {
-  return getPieceAt(state.board, position);
-};
-
-/**
- * Gets valid moves for a square
- */
-export const getValidMoves = (state: GameState, position: Position): Position[] => {
-  const piece = getPieceAt(state.board, position);
-  if (!piece || piece.color !== state.currentPlayer) {
-    return [];
-  }
-  return getValidMovesForPiece(
-    state.board,
-    piece,
-    position,
-    state.pieceDefinitions,
-    state.boardSize
-  );
 };
 
 /**

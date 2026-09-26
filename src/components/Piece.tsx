@@ -1,8 +1,7 @@
 /**
- * Square component - renders a single chess square
+ * Square and piece rendering components
  */
 
-import { useMemo } from 'react';
 import type { Position, Piece, PieceDefinitions, PieceDefinition } from '../core/types';
 import type { CSSProperties } from 'react';
 
@@ -10,12 +9,16 @@ export interface SquareProps {
   position: Position;
   squareSize: number;
   isLight: boolean;
-  isSelected?: boolean;
-  isValidMove?: boolean;
+  /** Whether this square is in the leftmost column (rank coordinate label) */
+  isLeftCol: boolean;
+  /** Whether this square is in the bottom row (file coordinate label) */
+  isBottomRow: boolean;
+  /** Total number of rows on the board (for rank labels) */
+  boardRows: number;
   isHoverMove?: boolean;
+  isHoverCapture?: boolean;
   isLastMoveFrom?: boolean;
   isLastMoveTo?: boolean;
-  isCheck?: boolean;
   piece?: Piece | null;
   onClick?: () => void;
   onMouseEnter?: () => void;
@@ -28,12 +31,13 @@ export const Square = ({
   position,
   squareSize,
   isLight,
-  isSelected = false,
-  isValidMove = false,
+  isLeftCol,
+  isBottomRow,
+  boardRows,
   isHoverMove = false,
+  isHoverCapture = false,
   isLastMoveFrom = false,
   isLastMoveTo = false,
-  isCheck = false,
   piece = null,
   onClick,
   onMouseEnter,
@@ -46,128 +50,46 @@ export const Square = ({
     onClick?.();
   };
 
-  const baseStyle = useMemo((): CSSProperties => ({
-    width: squareSize,
-    height: squareSize,
-    backgroundColor: isLight ? '#f0d9b5' : '#b58863',
-    position: 'relative',
-    cursor: onClick ? 'pointer' : 'default',
-    transition: 'background-color 0.1s ease',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  }), [squareSize, isLight, onClick]);
+  const classNames = [
+    'chess-square',
+    isLight ? 'light' : 'dark',
+    isHoverMove ? (isHoverCapture ? 'hover-capture' : 'hover-move') : '',
+    isLastMoveFrom || isLastMoveTo ? 'last-move' : '',
+  ].filter(Boolean).join(' ');
 
-  let backgroundColor = baseStyle.backgroundColor;
-  
-  if (isSelected) {
-    backgroundColor = '#86c232';
-  } else if (isValidMove) {
-    backgroundColor = isLight ? '#a8d050' : '#86c232';
-  } else if (isHoverMove) {
-    // Subtle highlight for hover moves
-    backgroundColor = isLight ? '#ffe082' : '#ffd54f';
-  } else if (isLastMoveFrom || isLastMoveTo) {
-    backgroundColor = '#ffff66';
-  } else if (isCheck) {
-    backgroundColor = '#ff6666';
-  }
-
-  // Valid move indicator (dot for empty, ring for capture) - for selected piece
-  const moveIndicator = isValidMove && !piece && !isSelected ? (
-    <div
-      className="move-indicator"
-      style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: squareSize * 0.25,
-        height: squareSize * 0.25,
-        borderRadius: '50%',
-        backgroundColor: 'rgba(0,0,0,0.3)',
-        pointerEvents: 'none',
-        zIndex: 5,
-      }}
-    />
-  ) : null;
-
-  // Capture indicator (ring) - for selected piece
-  const captureIndicator = isValidMove && piece && !isSelected ? (
-    <div
-      className="capture-indicator"
-      style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: squareSize * 0.85,
-        height: squareSize * 0.85,
-        border: `3px solid #86c232`,
-        borderRadius: '4px',
-        pointerEvents: 'none',
-        boxSizing: 'border-box',
-        zIndex: 5,
-      }}
-    />
-  ) : null;
-
-  // Hover capture indicator (ring, different color) - absolutely positioned
-  const hoverCaptureIndicator = isHoverMove && piece && !isSelected && !isValidMove ? (
+  // Hover capture indicator (red ring) - absolutely positioned
+  const hoverCaptureIndicator = isHoverCapture && piece ? (
     <div
       className="hover-capture-indicator"
       style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
         width: squareSize * 0.8,
         height: squareSize * 0.8,
-        border: `3px solid #d84315`,
-        borderRadius: '4px',
-        pointerEvents: 'none',
-        boxSizing: 'border-box',
-        backgroundColor: 'rgba(216, 67, 21, 0.15)',
-        zIndex: 5,
+        borderWidth: Math.max(2, squareSize * 0.045),
       }}
     />
   ) : null;
 
-  // Hover move indicator (dot for empty, different color) - absolutely positioned
-  const hoverMoveIndicator = isHoverMove && !piece && !isSelected && !isValidMove ? (
+  // Hover move indicator (amber dot) - absolutely positioned
+  const hoverMoveIndicator = isHoverMove && !isHoverCapture && !piece ? (
     <div
       className="hover-move-indicator"
       style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
         width: squareSize * 0.2,
         height: squareSize * 0.2,
-        borderRadius: '50%',
-        backgroundColor: 'rgba(255, 193, 7, 0.7)', // Amber for non-capture
-        pointerEvents: 'none',
-        border: '2px solid #fbc02d',
-        boxSizing: 'border-box',
-        zIndex: 5,
+        borderWidth: Math.max(1, squareSize * 0.03),
       }}
     />
   ) : null;
 
   return (
     <div
-      className={`chess-square ${isLight ? 'light' : 'dark'} ${isSelected ? 'selected' : ''} ${isValidMove ? 'valid-move' : ''} ${isHoverMove ? 'hover-move' : ''} ${isLastMoveFrom || isLastMoveTo ? 'last-move' : ''} ${isCheck ? 'check' : ''}`}
-      style={{
-        ...baseStyle,
-        backgroundColor,
-      }}
+      className={classNames}
+      style={{ width: squareSize, height: squareSize }}
       onClick={handleClick}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       data-position={`${position.row},${position.col}`}
     >
-      {moveIndicator}
-      {captureIndicator}
       {hoverMoveIndicator}
       {hoverCaptureIndicator}
       {piece && (
@@ -175,46 +97,25 @@ export const Square = ({
           piece={piece}
           position={position}
           squareSize={squareSize}
-          isSelected={isSelected}
-          isValidMove={isValidMove}
-          isLastMove={isLastMoveTo}
           showLeaderIndicator={showLeaderIndicator}
           pieceDefinitions={pieceDefinitions}
         />
       )}
       {/* Coordinates */}
-      {(position.col === 0 || position.row === 7) && (
+      {(isLeftCol || isBottomRow) && (
         <>
-          {position.col === 0 && (
+          {isLeftCol && (
             <div
               className="rank-coordinate"
-              style={{
-                position: 'absolute',
-                left: 4,
-                top: 2,
-                fontSize: squareSize * 0.15,
-                color: isLight ? '#b58863' : '#f0d9b5',
-                fontWeight: 'bold',
-                pointerEvents: 'none',
-                userSelect: 'none',
-              }}
+              style={{ fontSize: squareSize * 0.15 }}
             >
-              {8 - position.row}
+              {boardRows - position.row}
             </div>
           )}
-          {position.row === 7 && (
+          {isBottomRow && (
             <div
               className="file-coordinate"
-              style={{
-                position: 'absolute',
-                right: 4,
-                bottom: 2,
-                fontSize: squareSize * 0.15,
-                color: isLight ? '#b58863' : '#f0d9b5',
-                fontWeight: 'bold',
-                pointerEvents: 'none',
-                userSelect: 'none',
-              }}
+              style={{ fontSize: squareSize * 0.15 }}
             >
               {String.fromCharCode(97 + position.col)}
             </div>
@@ -232,9 +133,6 @@ export interface PieceProps {
   piece: Piece;
   position: Position;
   squareSize: number;
-  isSelected?: boolean;
-  isValidMove?: boolean;
-  isLastMove?: boolean;
   showLeaderIndicator?: boolean;
   pieceDefinitions?: PieceDefinitions;
 }
@@ -242,35 +140,27 @@ export interface PieceProps {
 export const PieceComponent = ({
   piece,
   squareSize,
-  isSelected = false,
   showLeaderIndicator = true,
   pieceDefinitions,
 }: PieceProps) => {
   const symbol = getPieceSymbol(piece, pieceDefinitions);
   const isLeader = piece.isLeader && showLeaderIndicator;
+  const colorClass = piece.color === 'white' ? 'chess-piece-white' : 'chess-piece-black';
 
-  const baseStyle = useMemo((): CSSProperties => ({
+  const baseStyle: CSSProperties = {
     fontSize: squareSize * 0.7,
-    lineHeight: 1,
-    userSelect: 'none',
-    pointerEvents: 'none',
-    textShadow: '0 2px 4px rgba(0,0,0,0.4)',
-    color: piece.color === 'white' ? '#ffffff' : '#1a1a1a',
-    filter: piece.color === 'white' 
-      ? 'drop-shadow(0 2px 2px rgba(0,0,0,0.5))'
-      : 'drop-shadow(0 2px 2px rgba(0,0,0,0.3))',
-    transform: isSelected ? 'scale(1.1)' : 'scale(1)',
-    transition: 'transform 0.1s ease',
-    zIndex: isSelected ? 10 : 1,
-  }), [squareSize, piece.color, isSelected]);
+  };
+
+  const label = `${piece.color} ${piece.type}${piece.hasMoved ? ' (moved)' : ''}`;
 
   if (!isLeader) {
     return (
       <span
+        className={`chess-piece ${colorClass}`}
         style={baseStyle}
         role="img"
-        aria-label={`${piece.color} ${piece.type}${piece.hasMoved ? ' (moved)' : ''}`}
-        title={`${piece.color} ${piece.type}${piece.hasMoved ? ' (moved)' : ''}`}
+        aria-label={label}
+        title={label}
       >
         {symbol}
       </span>
@@ -278,29 +168,19 @@ export const PieceComponent = ({
   }
 
   // Leader piece: symbol in black text on a white circle
-  const leaderCircleSize = squareSize * 0.45;
-  const leaderStyle: CSSProperties = {
-    ...baseStyle,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: leaderCircleSize,
-    height: leaderCircleSize,
-    borderRadius: '50%',
-    backgroundColor: '#ffffff',
-    border: '2px solid #3d2914',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-    color: '#1a1a1a', // Black text
-    fontSize: squareSize * 0.4,
-    fontWeight: 'bold',
-  };
-
   return (
     <span
-      style={leaderStyle}
+      className={`chess-piece leader ${colorClass}`}
+      style={{
+        ...baseStyle,
+        width: squareSize * 0.45,
+        height: squareSize * 0.45,
+        fontSize: squareSize * 0.4,
+        borderWidth: Math.max(1, squareSize * 0.03),
+      }}
       role="img"
-      aria-label={`${piece.color} ${piece.type} (Leader)${piece.hasMoved ? ' (moved)' : ''}`}
-      title={`${piece.color} ${piece.type} (Leader)${piece.hasMoved ? ' (moved)' : ''}`}
+      aria-label={`${label} (Leader)`}
+      title={`${label} (Leader)`}
     >
       {symbol}
     </span>
@@ -317,7 +197,7 @@ const getPieceSymbol = (piece: Piece, pieceDefinitions?: PieceDefinitions): stri
       return def.unicode;
     }
   }
-  return '?'
+  return '?';
 };
 
 /**
@@ -345,35 +225,28 @@ export const AnimatingPiece = ({
 }: AnimatingPieceProps) => {
   const symbol = getPieceSymbol(piece, pieceDefinitions);
   const isLeader = piece.isLeader && showLeaderIndicator;
+  const colorClass = piece.color === 'white' ? 'chess-piece-white' : 'chess-piece-black';
 
   // Interpolate position
   const currentRow = from.row + (to.row - from.row) * progress;
   const currentCol = from.col + (to.col - from.col) * progress;
 
-  const baseStyle = useMemo((): CSSProperties => ({
+  const baseStyle: CSSProperties = {
     fontSize: squareSize * 0.7,
-    lineHeight: 1,
-    userSelect: 'none',
-    pointerEvents: 'none',
-    textShadow: '0 2px 4px rgba(0,0,0,0.4)',
-    color: piece.color === 'white' ? '#ffffff' : '#1a1a1a',
-    filter: piece.color === 'white' 
-      ? 'drop-shadow(0 2px 2px rgba(0,0,0,0.5))'
-      : 'drop-shadow(0 2px 2px rgba(0,0,0,0.3))',
-    position: 'absolute',
     top: `${currentRow * squareSize + squareSize / 2}px`,
     left: `${currentCol * squareSize + squareSize / 2}px`,
-    transform: `translate(-50%, -50%)`,
-    zIndex: 100,
-  }), [squareSize, piece.color, currentRow, currentCol]);
+  };
+
+  const label = `${piece.color} ${piece.type}${piece.hasMoved ? ' (moved)' : ''}`;
 
   if (!isLeader) {
     return (
       <span
+        className={`chess-piece animating ${colorClass}`}
         style={baseStyle}
         role="img"
-        aria-label={`${piece.color} ${piece.type}${piece.hasMoved ? ' (moved)' : ''}`}
-        title={`${piece.color} ${piece.type}${piece.hasMoved ? ' (moved)' : ''}`}
+        aria-label={label}
+        title={label}
       >
         {symbol}
       </span>
@@ -381,29 +254,19 @@ export const AnimatingPiece = ({
   }
 
   // Leader piece: symbol in black text on a white circle
-  const leaderCircleSize = squareSize * 0.45;
-  const leaderStyle: CSSProperties = {
-    ...baseStyle,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: leaderCircleSize,
-    height: leaderCircleSize,
-    borderRadius: '50%',
-    backgroundColor: '#ffffff',
-    border: '2px solid #3d2914',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-    color: '#1a1a1a',
-    fontSize: squareSize * 0.4,
-    fontWeight: 'bold',
-  };
-
   return (
     <span
-      style={leaderStyle}
+      className={`chess-piece leader animating ${colorClass}`}
+      style={{
+        ...baseStyle,
+        width: squareSize * 0.45,
+        height: squareSize * 0.45,
+        fontSize: squareSize * 0.4,
+        borderWidth: Math.max(1, squareSize * 0.03),
+      }}
       role="img"
-      aria-label={`${piece.color} ${piece.type} (Leader)${piece.hasMoved ? ' (moved)' : ''}`}
-      title={`${piece.color} ${piece.type} (Leader)${piece.hasMoved ? ' (moved)' : ''}`}
+      aria-label={`${label} (Leader)`}
+      title={`${label} (Leader)`}
     >
       {symbol}
     </span>
